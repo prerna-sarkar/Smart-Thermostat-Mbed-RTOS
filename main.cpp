@@ -28,8 +28,7 @@ private:
 RGBLed::RGBLed (PinName redpin, PinName greenpin, PinName bluepin)
     : _redpin(redpin), _greenpin(greenpin), _bluepin(bluepin)
 {
-    //50Hz PWM clock default a bit too low, go to 2000Hz (less flicker)
-    _redpin.period(0.0005);
+    _redpin.period(0.0005); //50Hz PWM clock default a bit too low, go to 2000Hz (less flicker)
 }
  
 void RGBLed::write(float red,float green, float blue)
@@ -38,27 +37,22 @@ void RGBLed::write(float red,float green, float blue)
     _greenpin = green;
     _bluepin = blue;
 }
-//class could be moved to include file
  
  
-//Setup RGB led using PWM pins and class
-RGBLed myRGBled(p23,p22,p21); //RGB PWM pins
-//SDFileSystem sd(p5, p6, p7, p8, "sd");
+RGBLed myRGBled(p23,p22,p21); //RGB PWM pins // visual indication: changes color based on heating/cooling mode
+
 RawSerial pc(USBTX, USBRX);
 uLCD_4DGL uLCD(p13,p14,p11); // serial tx, serial rx, reset pin;
 DigitalOut led(LED1); //heartbeat led
-DigitalOut led1(LED2);
-DigitalOut led4(LED3);
-//PwmOut speaker (p24); // for freeze alarm
-AnalogOut speaker (p18);
+AnalogOut speaker (p18); // audio indication of heating/cooling mode
 PinDetect pb1(p19, PullUp); //debounced pushbutton using interrupts
 PinDetect pb2(p20, PullUp); //debounced pushbutton using interrupts
-RawSerial blue(p9,p10);
+RawSerial blue(p9,p10); //bluetooth
 BME280 sensor(p28, p27);
-Ticker tick;
-Ticker sample_tick;
-//AnalogOut DACout(p18);
-//wave_player waver(&DACout);
+
+// Ticker - a recurring interrupt
+Ticker tick; // sliding avg
+Ticker sample_tick; //audio
 
 DigitalOut Ctrl(p16);
 
@@ -90,19 +84,17 @@ volatile char varb;
 volatile char varc;
 volatile char vard;
 
-void pb_hit (void)
+void pb_hit (void) // pushbutton to switch between degC and degF modes
 {
     isCelsius = !isCelsius;
 }
 
-void pb_hit2 (void)
+void pb_hit2 (void) // pushbutton to switch between sliding window average values and instantaneous values
 {
     isAverage = !isAverage;
 }
 
-//interrupt routine to play next audio sample from array in flash
-
-void heating_on_audio ()
+void heating_on_audio () // interrupt routine to play audio sample from array in flash
 {
     speaker.write_u16(sound_data[ii]);
     ii++;
@@ -112,7 +104,7 @@ void heating_on_audio ()
     }
 }
 
-void cooling_on_audio ()
+void cooling_on_audio ()  // interrupt routine to play audio sample from array in flash
 {
     speaker.write_u16(sound_data[ii]);
     ii++;
@@ -122,7 +114,7 @@ void cooling_on_audio ()
     }
 }
 
-void tock (void)
+void tock (void) // display sliding window average of current temp, pressure, humidity
 {
     curr_temp_arr[i] = curr_temp;
     humidity_arr[i] = humidity;
@@ -146,7 +138,7 @@ void tock (void)
     
 }
 
-void Display_Desired_Temp(void const*argument)
+void Display_Desired_Temp(void const*argument) // Display Temp degC or degF
 {
     while(1)
     {
@@ -167,7 +159,7 @@ void Display_Desired_Temp(void const*argument)
     }
 }
 
-void mbedLED(void const*argument)
+void mbedLED(void const*argument) // Heartbeat LED
 {
     while(1)
     {
@@ -177,16 +169,15 @@ void mbedLED(void const*argument)
     }
 }
 
-void ControlCommands(void const*argument)
+void ControlCommands(void const*argument) // Get control commands from bluetooth
 {
     while (1)
     {
         if(!blue.readable()) Thread::yield();
+        
         if(blue.readable())
         {
             LCD.lock();
-            //pc.printf("Readable\r\n");
-            //pc.printf("%c\r\n", blue.getc());
             if(blue.readable()){
                 vara = blue.getc();
                 }
@@ -196,28 +187,24 @@ void ControlCommands(void const*argument)
             if(blue.readable()){
                 varc = blue.getc();
                 }
-            //vara = blue.getc();
-            //varb = blue.getc();
-            //varc = blue.getc();
-            //vard = blue.getc();
+            
             pc.printf("%c%c%c", vara, varb, varc);
-            //uLCD.locate(0,12);
-            //uLCD.printf("%c%c%c", vara, varb, varc);
-            if (vara == 'D' && varb == '+' && varc == '+') {
+
+            if (vara == 'D' && varb == '+' && varc == '+') {      // D++ => increase dtemp by 1
                 if(isCelsius) {
                     dtemp = dtemp + 1;
                 } else {
                     dtemp = dtemp + 0.5555;
                 }
                 }
-            if (vara == 'D' && varb == '-' && varc == '-') {
+            if (vara == 'D' && varb == '-' && varc == '-') {     // D-- => decrease dtemp by 1
                 if(isCelsius) {
                     dtemp = dtemp - 1;
                 } else {
                     dtemp = dtemp - 0.5555;
                 }
                 }
-            if (vara == 'S' && varb == 'E' && varc == 'T') {
+            if (vara == 'S' && varb == 'E' && varc == 'T') {     // SET => SET mode -> to modify 'current_temp'-> used for testing
                 isSetting = !isSetting;
                 }
             if (vara == '+' && isSetting) {
@@ -261,7 +248,7 @@ int main()
     pb2.setSampleFrequency();
     LCD.unlock();
 
-    Thread thread2(Display_Desired_Temp); //can combine max temp and min temp to one thread to have lesser threads in total????
+    Thread thread2(Display_Desired_Temp);
     Thread thread3(mbedLED);
     Thread thread4(ControlCommands);
 
@@ -285,6 +272,7 @@ int main()
                 
     while(1)
     {
+        // Get values from sensor
         if(!isSetting)
         {
             curr_temp = sensor.getTemperature();
@@ -295,6 +283,7 @@ int main()
         //dtemp = sensor.getTemperature();
         LCD.lock();
         
+        // Display Temp, Humidity, Pressure
         if(isAverage)
         {
             uLCD.locate(0,4);
@@ -352,6 +341,8 @@ int main()
             uLCD.locate(4,11);
             uLCD.printf("%04.2f hPa", pressure);
         }
+        
+        // Turn Heating or Cooling on/off based on dtemp
         if(dtemp > curr_temp + 1)
         {
             uLCD.color(RED);
@@ -401,6 +392,8 @@ int main()
             myRGBled.write(0.0,0.0,0.0);
             Ctrl=0;
         }
+        
+        // Display SET MODE status
         if(isSetting)
         {
             uLCD.color(GREEN);
